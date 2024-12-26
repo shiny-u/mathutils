@@ -1,0 +1,82 @@
+image: diceengineering/hydro:latest
+
+
+unitary-tests:
+  only:
+    - develop
+    - feature/BM_CI_unit_test  # TODO remove this
+
+  variables:
+    PRIVATE_TOKEN: $ACCESS_TOKEN
+
+  image: ubuntu:18.04
+
+  before_script:
+    # Add ppa for gcc-9. From https://askubuntu.com/questions/1140183/install-gcc-9-on-ubuntu-18-04
+    - apt-get update
+    - apt install -y software-properties-common
+    - add-apt-repository ppa:ubuntu-toolchain-r/test
+    - add-apt-repository ppa:deadsnakes/ppa
+    - apt-get update
+
+    - DEBIAN_FRONTEND=noninteractive apt-get install -y tzdata  # https://serverfault.com/questions/949991/how-to-install-tzdata-on-a-ubuntu-docker-image
+    - apt-get install -y build-essential libssl-dev libcurl4-openssl-dev libboost-all-dev uuid-dev wget python3.8 git gcc-9 g++-9
+    - update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 60 --slave /usr/bin/g++ g++ /usr/bin/g++-9
+    - update-alternatives --install /usr/bin/gcov gcov /usr/bin/gcov-9 100
+    - update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.8 100
+    - which git
+    - python3 --version
+    - apt-get install -y python3.8-distutils
+    - apt-get install -y python3-pip
+    - pip3 --version
+    - pip3 install --upgrade pip
+    - pip3 install awscli cmake gcovr badges-gitlab==0.8.3
+    - cmake --version
+
+    # check this out: https://docs.gitlab.com/ee/ci/ssh_keys/
+    - 'which ssh-agent || ( apt-get update -y && apt-get install openssh-client -y )'
+    - eval $(ssh-agent -s)
+    - mkdir -p ~/.ssh
+    - echo "$GITLAB_CI_SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_rsa
+    - chmod 700 ~/.ssh
+    - chmod 700 ~/.ssh/id_rsa
+    - ssh-add
+    # also add the known hosts so we don't have to accept when connecting to the host
+    - echo "$GITLAB_CI_SSH_KNOWN_HOST" | tr -d '\r' > ~/.ssh/known_hosts
+
+  script:
+    - mkdir build && cd build
+    - cmake .. -DMATHUTILS_TEST_COVERAGE=ON -DMATHUTILS_SKIP_LONG_TESTS=ON
+    - make -j 6
+    - ctest --output-junit unit_test_report.xml
+    - make coverage
+    - cd ..
+
+  after_script:
+    - badges-gitlab --junit-xml build/unit_test_report.xml
+    - ls public/badges
+
+  coverage: /^\s*lines:\s*\d+.\d+\%/
+
+  artifacts:
+    when: always
+    reports:
+      junit: build/unit_test_report.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: build/coverage.xml
+    paths:
+      - public/badges/*.svg
+
+
+upload-doc:
+  only:
+    - tags
+
+  script:
+    - cd docs/technical_notes
+    - tag=$(git describe --tags)
+    - sed -i "s/GIT_TAG_VERSION/$tag/g" conf.py
+    - make html
+    - aws s3 rm --recursive s3://developer-internal.d-ice.net/$CI_PROJECT_NAME
+    - aws s3 cp --recursive _build/html s3://developer-internal.d-ice.net/$CI_PROJECT_NAME

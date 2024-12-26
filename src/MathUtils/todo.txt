@@ -1,0 +1,4 @@
+MatrixMN
+
+ - Rajouter B = A*A^T (A^T is the transpose)
+ - Rajouter C = A*B^T

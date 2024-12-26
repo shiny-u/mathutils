@@ -1,0 +1,8 @@
+
+.idea
+cmake-build-*/
+build*/
+
+*.pyc
+
+docs/technical_notes/_build
